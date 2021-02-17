@@ -14,8 +14,9 @@ knitr::opts_chunk$set(echo = TRUE)
 <br/>
 
 ## 1. Introduction
-This appendix explains the hierarchical clustering analyses for Figure 2 in **Rillig, Ryo, & Lehmann (2021) Classifying human influences on terrestrial ecosystems in Global Change Biology.**   
+This appendix explains the hierarchical clustering analyses for **Rillig, Ryo, & Lehmann (2021) Classifying human influences on terrestrial ecosystems in Global Change Biology.**   
 The author of this document and R script is **Masahiro Ryo**.  
+The data and R script are available [here](https://github.com/masahiroryo/Classifying-human-influences)
 <br/>
 **In Section 2**, we read the R packages and dataset.  
 **In Section 3**, we build a classification tree for 30 factors based on 29 'traits' we identified as an expert opinion.  
