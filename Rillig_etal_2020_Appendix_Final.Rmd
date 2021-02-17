@@ -1,0 +1,340 @@
+---
+title: "Appendix: Rillig et al. 2021 Classifying human influences on terrestrial ecosystems"
+date: "Last update: 17 Feb 2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<br/>
+
+## 1. Introduction
+This appendix explains the hierarchical clustering analyses for Figure 2 in **Rillig, Ryo, & Lehmann (2021) Classifying human influences on terrestrial ecosystems in Global Change Biology.**   
+The author of this document and R script is **Masahiro Ryo**.  
+<br/>
+**In Section 2**, we read the R packages and dataset.  
+**In Section 3**, we build a classification tree for 30 factors based on 29 'traits' we identified as an expert opinion.  
+**In Section 4**, we build two classification trees for 10 factors studied in [Rillig et al. (2019) in Science](https://science.sciencemag.org/content/366/6467/886.editor-summary): One based on the traits and the other built based on the effects of the factors on several soil ecosystem properties. We compare these trees using a tanglegram approach and correlation test.  
+**In Section 5**, we show how to assess the importance of trait groups.  
+
+## 2. R packages and dataset
+### 2.1. Reading R packages
+We use the following R packages. If you have not installed any of them, please do so before the next step.
+```{r libraries, message=F, warning=F}
+library(knitr)
+library(tidyverse)
+library(ggplot2)
+library(ggdendro)
+library(dendextend)
+library(splitstackshape)
+```
+<br/>
+
+### 2.2. Reading the dataset
+We use the following dataset. The dataset is available at the same repository. The dataset's format is xlsx. The file contains three sheets (Description, Traits and Experiment). 
+
+#### 2.2.1. Factors and traits based on expert opinion (qualitative)
+```{r data_traits}
+df01 <- readxl::read_excel("Rillig_etal_2021_Classifying human influences.xlsx",sheet="Traits") %>%
+      column_to_rownames("Factor")
+
+df_traits <- df01
+
+# Show the header of the data
+kable(df_traits[1:5, 1:7], caption="Traits of human influential factors classified based on an expert opinion")
+```
+<br/>
+
+#### 2.2.2. The factors tested in the experiment (quantitative)
+```{r data_experiment}
+df02 <- readxl::read_excel("Rillig_etal_2021_Classifying human influences.xlsx",sheet="Experiment") 
+df_experiment <- df02
+
+# summarizing the data (taking the mean among replicates and then rescale)
+df_experiment_summary <- 
+  df_experiment %>%
+  group_by(remark) %>%
+  summarise_each(mean)  %>%
+  data.frame() %>%
+  column_to_rownames(var="remark") %>%
+  scale() # note that rescaling is needed for making a distance matrix with equally weighted variables
+
+
+# Show the header of the data
+kable(df_experiment_summary[1:5, 1:7], caption="Experimental result about the impacts of 10 factors on a soil ecosystem")
+
+```
+
+<br/>
+
+## 3. Hierarchical clustering for the 30 factors using the 29 traits
+### 3.1. Defining functions
+The following functions are generated for making ggplot2-based dendrogram figures  
+(esp. for coloring different clusters if the number of clusters is given)  
+1) dendro_data_k  
+2) set_labels_params  
+3) plot_ggdendro  
+<br/>
+
+*[Note] This part is lengthy and fully reproducible in the main R script and from [this link](https://atrebas.github.io/post/2019-06-08-lightweight-dendrograms/). Therefore, this part is not shown in this document.*
+
+```{r fake}
+# Here some functions are defined for visualization purposes
+```
+```{r clustering function, include=F}
+dendro_data_k <- function(hc, k) {
+  
+  hcdata    <-  ggdendro::dendro_data(hc, type = "rectangle")
+  seg       <-  hcdata$segments
+  labclust  <-  cutree(hc, k)[hc$order]
+  segclust  <-  rep(0L, nrow(seg))
+  heights   <-  sort(hc$height, decreasing = TRUE)
+  height    <-  mean(c(heights[k], heights[k - 1L]), na.rm = TRUE)
+  
+  for (i in 1:k) {
+    xi      <-  hcdata$labels$x[labclust == i]
+    idx1    <-  seg$x    >= min(xi) & seg$x    <= max(xi)
+    idx2    <-  seg$xend >= min(xi) & seg$xend <= max(xi)
+    idx3    <-  seg$yend < height
+    idx     <-  idx1 & idx2 & idx3
+    segclust[idx] <- i
+  }
+  
+  idx                    <-  which(segclust == 0L)
+  segclust[idx]          <-  segclust[idx + 1L]
+  hcdata$segments$clust  <-  segclust
+  hcdata$segments$line   <-  as.integer(segclust < 1L)
+  hcdata$labels$clust    <-  labclust
+  
+  hcdata
+}
+
+
+set_labels_params <- function(nbLabels,
+                              direction = c("tb", "bt", "lr", "rl"),
+                              fan       = FALSE) {
+  if (fan) {
+    angle       <-  360 / nbLabels * 1:nbLabels + 90
+    idx         <-  angle >= 90 & angle <= 270
+    angle[idx]  <-  angle[idx] + 180
+    hjust       <-  rep(0, nbLabels)
+    hjust[idx]  <-  1
+  } else {
+    angle       <-  rep(0, nbLabels)
+    hjust       <-  0
+    if (direction %in% c("tb", "bt")) { angle <- angle + 45 }
+    if (direction %in% c("tb", "rl")) { hjust <- 1 }
+  }
+  list(angle = angle, hjust = hjust, vjust = 0.5)
+}
+
+
+plot_ggdendro <- function(hcdata,
+                          direction   = c("lr", "rl", "tb", "bt"),
+                          fan         = FALSE,
+                          scale.color = NULL,
+                          branch.size = 1,
+                          label.size  = 3,
+                          nudge.label = 0.01,
+                          expand.y    = 0.1) {
+  
+  direction <- match.arg(direction) # if fan = FALSE
+  ybreaks   <- pretty(segment(hcdata)$y, n = 5)
+  ymax      <- max(segment(hcdata)$y)
+  
+  ## branches
+  p <- ggplot() +
+    geom_segment(data         =  segment(hcdata),
+                 aes(x        =  x,
+                     y        =  y,
+                     xend     =  xend,
+                     yend     =  yend,
+                     linetype =  factor(line),
+                     colour   =  factor(clust)),
+                 lineend      =  "round",
+                 show.legend  =  FALSE,
+                 size         =  branch.size)
+  
+  ## orientation
+  if (fan) {
+    p <- p +
+      coord_polar(direction = -1) +
+      scale_x_continuous(breaks = NULL,
+                         limits = c(0, nrow(label(hcdata)))) +
+      scale_y_reverse(breaks = ybreaks)
+  } else {
+    p <- p + scale_x_continuous(breaks = NULL)
+    if (direction %in% c("rl", "lr")) {
+      p <- p + coord_flip()
+    }
+    if (direction %in% c("bt", "lr")) {
+      p <- p + scale_y_reverse(breaks = ybreaks)
+    } else {
+      p <- p + scale_y_continuous(breaks = ybreaks)
+      nudge.label <- -(nudge.label)
+    }
+  }
+  
+  # labels
+  labelParams <- set_labels_params(nrow(hcdata$labels), direction, fan)
+  hcdata$labels$angle <- labelParams$angle
+  
+  p <- p +
+    geom_text(data        =  label(hcdata),
+              aes(x       =  x,
+                  y       =  y,
+                  label   =  label,
+                  colour  =  factor(clust),
+                  angle   =  angle),
+              vjust       =  labelParams$vjust,
+              hjust       =  labelParams$hjust,
+              nudge_y     =  ymax * nudge.label,
+              size        =  label.size,
+              show.legend =  FALSE)
+  
+  # colors and limits
+  if (!is.null(scale.color)) {
+    p <- p + scale_color_manual(values = scale.color)
+  }
+  
+  ylim <- -round(ymax * expand.y, 1)
+  p    <- p + expand_limits(y = ylim)
+  
+  p
+}
+```
+
+<br/>  
+
+### 3.2. Hierarchical clustering 
+The dataset is used for hierarchical clustering (hc) based on the dissimilarity matrix (euclidean distance). The parameter with dendro_data_k() can change how many clusters are colored differently.
+```{r hierarchical clustering}
+hc <- df_traits %>%
+      dist(method='euclidean') %>%
+      hclust(method='average')
+
+# Visualization
+p <- plot_ggdendro(hc  %>% 
+                   dendro_data_k(6),    # how many colors used for clustering visualization
+                   direction   = "lr",  # visualization formats
+                   label.size  = 3.5,
+                   branch.size = 0.1,
+                   expand.y    = 3)
+
+p <- p + theme_void() + expand_limits(x = c(-1, 32))
+p
+```
+<br/>
+
+## 4. Hierarchical clustering for the 10 factors: Traits vs Experimental results
+In this part we use the dataset of [Rillig et al. (2019) in Science](https://science.sciencemag.org/content/366/6467/886.editor-summary). The study investigated the effects of 10 different global change factors on soil microbial biodiversity and ecosystem functions. To test if the expert-opinion-based factor similarity can explain the effect similarity of the 10 factors, we apply a tanglegram with correlation analysis.
+<br/>
+
+### 4.1. Building the tanglegram
+
+Building two dendrograms.
+```{r hierarchical clustering: two dendrograms}
+# Hierarchical clustering of the 10 factors
+hc_experiment <- 
+  df_experiment_summary %>%
+  dist(method = 'euclidean') %>%
+  hclust(method = 'average') %>%
+  as.dendrogram ()
+
+# Extract the 10 factors from the 30 factors
+
+gP <- c(4,6,7,8,11,12) # plant-related variables to be eliminated from the tanglegram analysis 
+                       # because in the soil experiment there was no plant included
+
+hc_traits <- 
+  df_traits[c(1,2,3,6,13,14,18,19,20,21),-gP] %>%  # these rows are the corresponding 10 factors
+  dist(method = 'euclidean') %>%
+  hclust(method = 'average') %>%
+  as.dendrogram ()
+
+```
+
+The two dendrograms are now compared as a tanglegram.  
+```{r tanglegram visualization}
+
+dendlist(hc_experiment, hc_traits) %>%
+  untangle(method = "step1side") %>%   # Find the best alignment layout
+  tanglegram(lwd = 0.5, 
+             columns_width = c(1, 0.3, 1),
+             highlight_distinct_edges=F,
+             highlight_branches_lwd=F,
+             margin_inner=15)                       # Draw the two dendrograms
+```
+  
+The left dendrogram is based on the experimental results. The right one is based on the expert-based traits.
+We can observe that the set of Salinity, Heavy metals - copper, and Water - reduction (drought) are connected between the dendrograms in red. This indicates that they belong to the exact same set of clustering in both dendrograms.  
+  
+<br/>  
+
+### 4.2. Correlation coefficient
+
+We also estimate the Cophenetic correlation coefficient. For estimating the confidence intervals, Masahiro Ryo developed an algorithm that conducts a bootstrap resampling on the replicated samples from the experiment dataset.
+```{r bootstrap ci estimates}
+
+# N-times iteration
+N <- 1:1000
+# Correlation coefficients
+cor.cophenetic = vector()
+cor.bakers.gamma = vector()
+
+# bootstrap coefficient estimate
+for(i in N){
+  # set seed
+  set.seed(i)
+  # stratified bootstrap resampling for each global change factor (8 replicates for each factor)
+  boot.df <- stratified(df_experiment[,1:7], "remark", 8,replace=T) %>%
+            group_by(remark) %>%
+            summarise_each(mean) %>%
+            data.frame() %>%
+            column_to_rownames(var="remark")%>%
+            scale() 
+    
+  # dendrogram
+  hc_experiment.boot   <- dist(boot.df, method = 'euclidean') %>%
+                          hclust(method="average") %>%
+                          as.dendrogram()
+  
+  # Cophenetic correlation coefficient
+  cor.cophenetic   <- c(cor.cophenetic, cor_cophenetic(hc_traits, hc_experiment.boot))    
+
+  
+}
+
+# mean, se, and 95confidence intervals for correlation coefficient
+ci <- function(x){c(ci.lower=quantile(x, 0.05), se.lower=mean(x)-sd(x), mean=mean(x), se.upper=mean(x)+sd(x),
+                    ci.upper=quantile(x, 0.95))}
+
+# Cophenetic correlation coefficient
+ci(cor.cophenetic)
+
+```  
+<br/>
+
+## 5. Drop-out approach
+Here we very shortly explain what was done for dropping out some traits. Drop-out is a popular approach to test the importance of the target variables. If dropping out some variables decreases the correlation strength, it suggests that the dropped out variables are important.  
+
+Here is the list of dropped out grops.
+```{r data to drop}
+
+# data subset: If we want to drop-out some traits to build the dendrogram.
+g1 <- c(1:3,24:29)     # Nature of factor (group1)
+g2 <- c(7:12)          # Proximate Effect Direction (group2)
+g3 <- c(4:6,15:19)     # Effect mechanism (group1)
+g4 <- c(13:14,20:23)   # Nature of factor (group1)
+```
+
+Each group can be dropped out before conducting the correlation coefficient evaluation. For instance, if we want to assess the importance of the traits associated with Nature of factor (g1), we just drop them out as follows and conduct the correlation test.
+
+```{r how to drop}
+df_traits <- df_traits[-g1]
+```
